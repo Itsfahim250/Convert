@@ -18,6 +18,8 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
+from pyrogram import Client, filters
+from pyrogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
 # ── Environment Variables ────────────────────────────────────────────────
 API_ID = int(os.getenv("API_ID", "0"))
@@ -25,57 +27,15 @@ API_HASH = os.getenv("API_HASH", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 TEMP_DIR_NAME = os.getenv("TEMP_DIR", "tg_video_bot_files")
-YT_DLP_BIN = os.getenv("YT_DLP_BIN", "yt-dlp")
-
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "2000"))
 MAX_CONCURRENT_TASKS = int(os.getenv("MAX_CONCURRENT_TASKS", "2"))
-
-FFMPEG_BIN_ENV = os.getenv("FFMPEG_BIN")
-FFPROBE_BIN_ENV = os.getenv("FFPROBE_BIN")
-
 COOKIES_FILE_ENV = os.getenv("COOKIES_FILE", "cookies.txt")
-
-# ── Auto-detect FFmpeg ────────────────────────────────────────────────────
-def _find_ffmpeg() -> tuple[str, str]:
-    if FFMPEG_BIN_ENV and FFPROBE_BIN_ENV:
-        return FFMPEG_BIN_ENV, FFPROBE_BIN_ENV
-
-    system_ff = shutil.which("ffmpeg")
-    system_fp = shutil.which("ffprobe")
-    if system_ff and system_fp:
-        return system_ff, system_fp
-    try:
-        import imageio_ffmpeg
-        ff = imageio_ffmpeg.get_ffmpeg_exe()
-        fp = str(Path(ff).parent / "ffprobe")
-        if not Path(fp).exists():
-            fp = ff
-        return ff, fp
-    except Exception:
-        pass
-    raise RuntimeError("FFmpeg not found! Install it with: sudo apt install ffmpeg")
-
-FFMPEG_BIN, FFPROBE_BIN = _find_ffmpeg()
-
-from pyrogram import Client, filters
-from pyrogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-
-# ── Logging ───────────────────────────────────────────────────────────────
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-    level=logging.INFO,
-)
-logger = logging.getLogger(__name__)
-
-# ── Credentials loaded from Environment Variables ──────────────────────
 
 # ── Configuration ─────────────────────────────────────────────────────────
 TEMP_DIR = Path.cwd() / TEMP_DIR_NAME
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 YT_DLP_BIN = os.getenv("YT_DLP_BIN") or shutil.which("yt-dlp") or "yt-dlp"
-MAX_FILE_SIZE_MB  = 2000
-MAX_CONCURRENT_TASKS = 2
 
 # ── Cookies Path (bot.py এর পাশে cookies.txt রাখুন) ──────────────────────
 COOKIES_FILE = Path(__file__).parent / COOKIES_FILE_ENV
@@ -85,6 +45,42 @@ def _cookies_args() -> list:
     if COOKIES_FILE.exists():
         return ["--cookies", str(COOKIES_FILE)]
     return []
+
+# ── Auto-detect FFmpeg ────────────────────────────────────────────────────
+def _find_ffmpeg() -> tuple[str, str]:
+    # প্রথমে Environment Variable চেক করবে
+    ffmpeg_env = os.getenv("FFMPEG_BIN")
+    ffprobe_env = os.getenv("FFPROBE_BIN")
+    if ffmpeg_env and ffprobe_env:
+        return ffmpeg_env, ffprobe_env
+
+    # এরপর সিস্টেমে ইনস্টল করা আছে কিনা চেক করবে
+    system_ff = shutil.which("ffmpeg")
+    system_fp = shutil.which("ffprobe")
+    if system_ff and system_fp:
+        return system_ff, system_fp
+        
+    # সবশেষে imageio_ffmpeg প্যাকেজ চেক করবে (Render-এর জন্য সবচেয়ে ভালো উপায়)
+    try:
+        import imageio_ffmpeg
+        ff = imageio_ffmpeg.get_ffmpeg_exe()
+        fp = str(Path(ff).parent / "ffprobe")
+        if not Path(fp).exists():
+            fp = ff
+        return ff, fp
+    except ImportError:
+        pass
+        
+    raise RuntimeError("FFmpeg not found! Please add 'imageio-ffmpeg' to requirements.txt")
+
+FFMPEG_BIN, FFPROBE_BIN = _find_ffmpeg()
+
+# ── Logging ───────────────────────────────────────────────────────────────
+logging.basicConfig(
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
 
 if not API_ID or not API_HASH or not BOT_TOKEN:
     raise ValueError("Missing required environment variables: API_ID, API_HASH, BOT_TOKEN")
@@ -143,8 +139,8 @@ STATE_NONE         = 0
 STATE_ASK_BATCH    = 1
 STATE_WAIT_VIDEO   = 2
 STATE_WAIT_FORMAT  = 3
-STATE_DC_ASK_COUNT = 10   # Direct Convert: কতটি লিংক?
-STATE_DC_WAIT_URLS = 11   # Direct Convert: URL সংগ্রহ
+STATE_DC_ASK_COUNT = 10
+STATE_DC_WAIT_URLS = 11
 
 # Callback prefixes
 CB_VCODEC   = "vc:"
@@ -153,11 +149,11 @@ CB_FPS      = "fps:"
 CB_ACODEC   = "ac:"
 CB_CONFIRM  = "cnf:"
 CB_FORMAT   = "fmt:"
-CB_DC_VC    = "dcvc:"   # Direct Convert video codec
+CB_DC_VC    = "dcvc:"
 CB_DC_RES   = "dcres:"
 CB_DC_FPS   = "dcfps:"
 CB_DC_AC    = "dcac:"
-CB_DC_CONF  = "dccnf:"  # Direct Convert confirm
+CB_DC_CONF  = "dccnf:"
 
 USER_DATA = {}
 
@@ -270,7 +266,7 @@ async def animate_progress(proc, smsg, dur, v_idx, v_total):
             break
 
 # ══════════════════════════════════════════════════════════════════════════
-# YouTube Download Helper (yt-dlp) — cookies.txt সাপোর্ট সহ
+# YouTube Download Helper (yt-dlp)
 # ══════════════════════════════════════════════════════════════════════════
 
 YOUTUBE_RE = re.compile(
@@ -281,7 +277,6 @@ def is_valid_youtube_url(url: str) -> bool:
     return bool(YOUTUBE_RE.match(url.strip()))
 
 async def ytdlp_download_video(url: str, quality_height: int, out_path: str) -> str:
-    """yt-dlp দিয়ে YouTube ভিডিও (video+audio) ডাউনলোড করে merge করে দেয়।"""
     fmt = f"bestvideo[height<={quality_height}]+bestaudio/best[height<={quality_height}]/best"
     cmd = [
         YT_DLP_BIN,
@@ -301,7 +296,7 @@ async def ytdlp_download_video(url: str, quality_height: int, out_path: str) -> 
     stdout, stderr = await proc.communicate()
     if proc.returncode != 0:
         raise RuntimeError(stderr.decode("utf-8", errors="ignore")[:300])
-    # yt-dlp কখনো .mp4 ছাড়া সেভ করে, তাই সঠিক ফাইল খুঁজি
+        
     base = out_path.replace(".mp4", "")
     for ext in ["mp4", "mkv", "webm", "avi"]:
         candidate = f"{base}.{ext}" if not out_path.endswith(f".{ext}") else out_path
@@ -312,7 +307,6 @@ async def ytdlp_download_video(url: str, quality_height: int, out_path: str) -> 
     raise RuntimeError("yt-dlp আউটপুট ফাইল খুঁজে পাওয়া যায়নি।")
 
 async def ytdlp_get_info(url: str) -> dict:
-    """ভিডিওর তথ্য JSON হিসেবে নিয়ে আসে।"""
     cmd = [
         YT_DLP_BIN,
         "--dump-json",
@@ -342,7 +336,6 @@ async def handle_text(client, message):
     ud  = get_ud(uid)
     text = message.text.strip()
 
-    # ── /start / /cancel ──────────────────────────────────────────────────
     if text in ["/start", "/cancel"]:
         USER_DATA.pop(uid, None)
         await message.reply(
@@ -353,7 +346,6 @@ async def handle_text(client, message):
         )
         return
 
-    # ── সাহায্য ───────────────────────────────────────────────────────────
     if text == "ℹ️ সাহায্য":
         cookies_status = "✅ cookies.txt পাওয়া গেছে" if COOKIES_FILE.exists() else "❌ cookies.txt নেই (age-restricted ভিডিও কাজ নাও করতে পারে)"
         await message.reply(
@@ -371,19 +363,16 @@ async def handle_text(client, message):
         )
         return
 
-    # ── ভিডিও কনভার্ট করুন ───────────────────────────────────────────────
     if text == "🎬 ভিডিও কনভার্ট করুন":
         ud["state"] = STATE_ASK_BATCH
         await message.reply("🎬 **কয়টি ভিডিও কনভার্ট করতে চান?**\n(১ থেকে ৫০ এর মধ্যে একটি সংখ্যা লিখুন):")
         return
 
-    # ── শুধু ফরম্যাট বদলান ───────────────────────────────────────────────
     if text == "🔄 শুধু ফরম্যাট বদলান":
         ud["state"] = STATE_WAIT_FORMAT
         await message.reply("🔄 **ফরম্যাট পরিবর্তন**\n\nদয়া করে ভিডিও ফাইলটি পাঠান:")
         return
 
-    # ── 🌐 Direct Convert ─────────────────────────────────────────────────
     if text == "🌐 Direct Convert":
         USER_DATA[uid] = {"state": STATE_DC_ASK_COUNT}
         await message.reply(
@@ -393,7 +382,6 @@ async def handle_text(client, message):
         )
         return
 
-    # ── Batch count input ─────────────────────────────────────────────────
     if ud["state"] == STATE_ASK_BATCH:
         try:
             c = int(text)
@@ -408,7 +396,6 @@ async def handle_text(client, message):
             await message.reply("⚠️ দয়া করে ১ থেকে ৫০ এর মধ্যে একটি সঠিক সংখ্যা দিন।")
         return
 
-    # ── Direct Convert: count input ───────────────────────────────────────
     if ud["state"] == STATE_DC_ASK_COUNT:
         try:
             c = int(text)
@@ -425,7 +412,6 @@ async def handle_text(client, message):
             await message.reply("⚠️ দয়া করে ১ থেকে ২০ এর মধ্যে একটি সঠিক সংখ্যা দিন।")
         return
 
-    # ── Direct Convert: URL collection ────────────────────────────────────
     if ud["state"] == STATE_DC_WAIT_URLS:
         url = text.strip()
         if not is_valid_youtube_url(url):
@@ -444,7 +430,6 @@ async def handle_text(client, message):
         if done < total:
             await message.reply(f"✅ লিংক {done}/{total} পেয়েছি।\n\n**{done + 1} নম্বর লিংক পাঠান:**")
         else:
-            # সব লিংক পাওয়া গেছে — এখন কনফিগ সিলেক্ট করতে বলব
             ud["state"] = STATE_NONE
             await message.reply(
                 f"✅ সবগুলো ({total}টি) লিংক পেয়েছি!\n\n"
@@ -453,10 +438,6 @@ async def handle_text(client, message):
                 reply_markup=_build_kb(VIDEO_CODECS, CB_DC_VC, 1)
             )
         return
-
-# ══════════════════════════════════════════════════════════════════════════
-# Media Handler (for Telegram video upload flow)
-# ══════════════════════════════════════════════════════════════════════════
 
 @app.on_message(filters.private & (filters.video | filters.document))
 async def handle_media(client, message):
@@ -509,17 +490,12 @@ async def handle_media(client, message):
             reply_markup=InlineKeyboardMarkup([btns[i:i + 3] for i in range(0, len(btns), 3)])
         )
 
-# ══════════════════════════════════════════════════════════════════════════
-# Callback Queries
-# ══════════════════════════════════════════════════════════════════════════
-
 @app.on_callback_query()
 async def handle_callback(client, query):
     d   = query.data
     uid = query.from_user.id
     ud  = get_ud(uid)
 
-    # ─── Normal convert flow ──────────────────────────────────────────────
     if d.startswith(CB_VCODEC):
         ud["video_codec"] = d[len(CB_VCODEC):]
         await safe_edit(query.message, "✅ ভিডিও কোডেক সেভ।\n\n2️⃣ **রেজুলেশন সিলেক্ট করুন:**", _build_kb(RESOLUTIONS, CB_RES, 2))
@@ -553,7 +529,6 @@ async def handle_callback(client, query):
         await query.answer()
         await execute_format(client, query.message, ud, d[len(CB_FORMAT):], uid)
 
-    # ─── Direct Convert flow ──────────────────────────────────────────────
     elif d.startswith(CB_DC_VC):
         ud["dc_video_codec"] = d[len(CB_DC_VC):]
         await safe_edit(query.message, "✅ ভিডিও কোডেক সেভ।\n\n2️⃣ **রেজুলেশন সিলেক্ট করুন:**", _build_kb(RESOLUTIONS, CB_DC_RES, 2))
@@ -598,10 +573,6 @@ async def handle_callback(client, query):
         await query.answer()
         await safe_edit(query.message, "🚀 Direct Convert শুরু হচ্ছে...")
         await execute_direct_convert(client, query.message, ud, uid)
-
-# ══════════════════════════════════════════════════════════════════════════
-# Execute: Normal Batch Convert
-# ══════════════════════════════════════════════════════════════════════════
 
 async def execute_batch(client, message, ud, uid):
     msgs = ud.get("batch_messages", [])
@@ -673,10 +644,6 @@ async def execute_batch(client, message, ud, uid):
     USER_DATA.pop(uid, None)
     await message.reply("🎉 **আপনার সবগুলো ভিডিও সফলভাবে কনভার্ট সম্পন্ন হয়েছে!**", reply_markup=_main_menu_kb())
 
-# ══════════════════════════════════════════════════════════════════════════
-# Execute: Format Only
-# ══════════════════════════════════════════════════════════════════════════
-
 async def execute_format(client, message, ud, ext, uid):
     msg = ud.get("format_message")
     if not msg:
@@ -734,10 +701,6 @@ async def execute_format(client, message, ud, ext, uid):
     _cleanup(inp, out)
     USER_DATA.pop(uid, None)
 
-# ══════════════════════════════════════════════════════════════════════════
-# Execute: Direct Convert (YouTube → Download → FFmpeg → Send)
-# ══════════════════════════════════════════════════════════════════════════
-
 async def execute_direct_convert(client, message, ud, uid):
     urls  = ud.get("dc_urls", [])
     total = len(urls)
@@ -747,14 +710,13 @@ async def execute_direct_convert(client, message, ud, uid):
     fps = _lookup(FPS_OPTIONS,  "id", ud["dc_fps"])
     ac  = _lookup(AUDIO_CODECS, "id", ud["dc_audio_codec"])
 
-    # resolution থেকে height বের করি (yt-dlp এর জন্য)
     if res["scale"]:
         try:
             dl_height = int(res["scale"].split(":")[1])
         except Exception:
             dl_height = 1080
     else:
-        dl_height = 9999  # best
+        dl_height = 9999
 
     summary_text = (
         f"📹 **Video:** {vc['label']}\n"
@@ -772,7 +734,6 @@ async def execute_direct_convert(client, message, ud, uid):
         async with sem:
             smsg = await message.reply(f"🔍 **ভিডিও {idx}/{total}:** তথ্য নেওয়া হচ্ছে...")
 
-            # ── Step 1: Get info ─────────────────────────────────────────
             try:
                 info = await ytdlp_get_info(url)
                 title    = info.get("title", f"Video_{idx}")
@@ -786,7 +747,6 @@ async def execute_direct_convert(client, message, ud, uid):
                 await safe_edit(smsg, f"❌ ভিডিও {idx} তথ্য পাওয়া যায়নি:\n`{str(e)[:200]}`")
                 return
 
-            # ── Step 2: Download via yt-dlp ──────────────────────────────
             ts     = datetime.now().strftime("%Y%m%d_%H%M%S")
             raw_path = str(TEMP_DIR / f"dc_raw_{uid}_{idx}_{ts}.mp4")
             out_path = str(TEMP_DIR / f"dc_out_{uid}_{idx}_{ts}.{vc['ext']}")
@@ -801,7 +761,6 @@ async def execute_direct_convert(client, message, ud, uid):
                 await safe_edit(smsg, f"❌ ভিডিও {idx} ডাউনলোড ব্যর্থ:\n`{str(e)[:200]}`")
                 return
 
-            # ── Step 3: FFmpeg convert ───────────────────────────────────
             cmd = _build_cmd(actual_raw, out_path, vc, res, fps, ac)
             p   = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
             dur = _probe_duration(actual_raw)
@@ -814,7 +773,6 @@ async def execute_direct_convert(client, message, ud, uid):
                 _cleanup(actual_raw, out_path)
                 return
 
-            # ── Step 4: Upload ───────────────────────────────────────────
             if not Path(out_path).exists():
                 await safe_edit(smsg, f"❌ ভিডিও {idx}/{total} আউটপুট ফাইল পাওয়া যায়নি।")
                 _cleanup(actual_raw)
@@ -859,10 +817,6 @@ async def execute_direct_convert(client, message, ud, uid):
         "🎉 **সবগুলো Direct Convert সম্পন্ন হয়েছে!**",
         reply_markup=_main_menu_kb()
     )
-
-# ══════════════════════════════════════════════════════════════════════════
-# Run
-# ══════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     logger.info("Bot is running. Press Ctrl+C to stop.")
