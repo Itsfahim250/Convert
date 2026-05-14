@@ -818,8 +818,33 @@ async def execute_direct_convert(client, message, ud, uid):
         reply_markup=_main_menu_kb()
     )
 
+# ══════════════════════════════════════════════════════════════════════════
+# Run
+# ══════════════════════════════════════════════════════════════════════════
+
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# Render-এর জন্য একটি ডামি ওয়েব সার্ভার
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b"Bot is running successfully on Render!")
+
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 8080))
+    server_address = ('0.0.0.0', port)
+    httpd = HTTPServer(server_address, DummyHandler)
+    httpd.serve_forever()
+
 if __name__ == "__main__":
     logger.info("Bot is running. Press Ctrl+C to stop.")
+    
+    # ব্যাকগ্রাউন্ডে ডামি সার্ভার চালু করা হচ্ছে
+    threading.Thread(target=run_dummy_server, daemon=True).start()
+    
     if COOKIES_FILE.exists():
         logger.info(f"✅ cookies.txt found at: {COOKIES_FILE}")
     else:
