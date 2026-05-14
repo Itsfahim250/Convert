@@ -18,41 +18,22 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-# ── Environment helpers ──────────────────────────────────────────────────
-def _load_env_file(env_path: Path) -> None:
-    """Minimal .env loader so the bot works without extra dependencies."""
-    if not env_path.exists():
-        return
-    try:
-        for raw in env_path.read_text(encoding="utf-8").splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = value
-    except Exception:
-        pass
 
+# ── Environment Variables ────────────────────────────────────────────────
+API_ID = int(os.getenv("API_ID", "0"))
+API_HASH = os.getenv("API_HASH", "")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
-def _env_int(name: str, default: int) -> int:
-    try:
-        return int(os.getenv(name, str(default)).strip())
-    except Exception:
-        return default
+TEMP_DIR_NAME = os.getenv("TEMP_DIR", "tg_video_bot_files")
+YT_DLP_BIN = os.getenv("YT_DLP_BIN", "yt-dlp")
 
+MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "2000"))
+MAX_CONCURRENT_TASKS = int(os.getenv("MAX_CONCURRENT_TASKS", "2"))
 
-def _env_str(name: str, default: str) -> str:
-    value = os.getenv(name, default)
-    return default if value is None or str(value).strip() == "" else str(value).strip()
+FFMPEG_BIN_ENV = os.getenv("FFMPEG_BIN")
+FFPROBE_BIN_ENV = os.getenv("FFPROBE_BIN")
 
-
-# Load .env from the script directory first, then current working dir.
-SCRIPT_DIR = Path(__file__).resolve().parent
-_load_env_file(SCRIPT_DIR / ".env")
-_load_env_file(Path.cwd() / ".env")
+COOKIES_FILE_ENV = os.getenv("COOKIES_FILE", "cookies.txt")
 
 # ── Auto-detect FFmpeg ────────────────────────────────────────────────────
 def _find_ffmpeg() -> tuple[str, str]:
@@ -63,7 +44,6 @@ def _find_ffmpeg() -> tuple[str, str]:
     system_fp = shutil.which("ffprobe")
     if system_ff and system_fp:
         return system_ff, system_fp
-
     try:
         import imageio_ffmpeg
         ff = imageio_ffmpeg.get_ffmpeg_exe()
@@ -87,23 +67,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── Configuration (env-driven) ───────────────────────────────────────────
-API_ID = _env_int("API_ID", 0)
-API_HASH = _env_str("API_HASH", "")
-BOT_TOKEN = _env_str("BOT_TOKEN", "")
+# ── Credentials loaded from Environment Variables ──────────────────────
 
-TEMP_DIR = Path(_env_str("TEMP_DIR", str(Path.cwd() / "tg_video_bot_files")))
+# ── Configuration ─────────────────────────────────────────────────────────
+TEMP_DIR = Path.cwd() / TEMP_DIR_NAME
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-YT_DLP_BIN = _env_str("YT_DLP_BIN", shutil.which("yt-dlp") or "yt-dlp")
-FFMPEG_BIN_ENV = _env_str("FFMPEG_BIN", "")
-FFPROBE_BIN_ENV = _env_str("FFPROBE_BIN", "")
+YT_DLP_BIN = os.getenv("YT_DLP_BIN") or shutil.which("yt-dlp") or "yt-dlp"
+MAX_FILE_SIZE_MB  = 2000
+MAX_CONCURRENT_TASKS = 2
 
-MAX_FILE_SIZE_MB = _env_int("MAX_FILE_SIZE_MB", 2000)
-MAX_CONCURRENT_TASKS = _env_int("MAX_CONCURRENT_TASKS", 2)
-
-# ── Cookies Path (can be overridden via env) ─────────────────────────────
-COOKIES_FILE = Path(_env_str("COOKIES_FILE", str(SCRIPT_DIR / "cookies.txt")))
+# ── Cookies Path (bot.py এর পাশে cookies.txt রাখুন) ──────────────────────
+COOKIES_FILE = Path(__file__).parent / COOKIES_FILE_ENV
 
 def _cookies_args() -> list:
     """cookies.txt থাকলে yt-dlp এর জন্য argument return করে।"""
@@ -112,10 +87,7 @@ def _cookies_args() -> list:
     return []
 
 if not API_ID or not API_HASH or not BOT_TOKEN:
-    raise RuntimeError(
-        "Missing required environment variables: API_ID, API_HASH, BOT_TOKEN. "
-        "Put them in .env or set them in the shell before running the bot."
-    )
+    raise ValueError("Missing required environment variables: API_ID, API_HASH, BOT_TOKEN")
 
 app = Client("video_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
