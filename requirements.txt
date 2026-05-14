@@ -1,12 +1,4 @@
-# ─── Telegram Bot (MTProto — 2GB file support) ────────────────────────────
-pyrogram==2.0.106
-TgCrypto==1.2.5
-
-# ─── FFmpeg via Python (কোনো apt/system command লাগবে না) ─────────────────
-imageio-ffmpeg>=0.4.9
-
-# ─── yt-dlp via pip (কোনো system command লাগবে না) ───────────────────────
-yt-dlp>=2024.1.1
-
-# ─── Async HTTP ───────────────────────────────────────────────────────────
-aiohttp>=3.8.0
+pyrogram
+tgcrypto
+yt-dlp
+imageio-ffmpeg
